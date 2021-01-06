@@ -88,12 +88,14 @@ class RemoteIdealWorldEgo:
         '''Transfer proto trajectory to SMARTS trajectory'''
         print("action adapter action traj: ", ideal_world_traj)
 
+        t = []
         x = []
         y = []
         theta = []
         speed = []
 
         for traj_point in ideal_world_traj.traj_points:
+            t.append(traj_point.t)
             x.append(traj_point.x)
             y.append(traj_point.y)
             theta.append(traj_point.theta - (PI / 2))
@@ -104,7 +106,7 @@ class RemoteIdealWorldEgo:
 
         # To make sure the first point is ahead of ego.
         # TODO: Check the first point constrain here or let client-end to ensure this?
-        traj = np.array([x[0:], y[0:], theta[0:], speed[0:]])
+        traj = np.array([t[0:], x[0:], y[0:], theta[0:], speed[0:]])
         return traj
 
     @staticmethod

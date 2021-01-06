@@ -37,14 +37,16 @@ from smarts.core.agent import AgentSpec
 from smarts.core.agent_interface import AgentInterface, AgentType
 from smarts.core.agent_manager import AgentManager
 
+from smarts.benchmark.metrics.basic_metrics import Metric
+
 from examples import default_argument_parser
 
 from ideal_world_bridge.ideal_world_interface import RemoteIdealWorldEgo
 from smarts.core.controllers import ActionSpaceType
 
-'''Currently, Benchmark Server just support one scenario one client fot testing.'''
-
 import socket
+
+'''Currently, Benchmark Server just support one scenario one client fot testing.'''
 
 def get_host_ip():
     try:
@@ -120,6 +122,8 @@ class BenchmarkServer:
         zoo_workers=None,
         auth_key=None,
     ):
+        self._metircs = Metric(1)
+
         self.has_connection = False
 
         self._log = logging.getLogger(self.__class__.__name__)
@@ -219,6 +223,8 @@ class BenchmarkServer:
                 proto_ego_obs = proto_obs[EGO_ID]
                 proto_ego_act = self._ego.act(proto_ego_obs, self._is_reset)
                 proto_obs, _, dones, _ = self.step({EGO_ID: proto_ego_act})
+            metric_res = self._metircs.compute()
+            print("++++Metric++++\n", metric_res)
 
     def step(self, agent_actions):
         '''Input serilized action and out serilized observation as well'''
@@ -228,7 +234,8 @@ class BenchmarkServer:
             for agent_id, action in agent_actions.items()
         }
 
-        observations, _, agent_dones, _ = self._smarts.step(agent_actions)
+        observations, rewards, agent_dones, infos = self._smarts.step(agent_actions)
+        self._metircs.log_step(observations, rewards, agent_dones, infos, 0)
         print("smarts ego action : ", agent_actions[EGO_ID])
         print("smarts ego observation: ", observations[EGO_ID])
 
@@ -247,6 +254,8 @@ class BenchmarkServer:
         return obs, _, agent_dones, _
 
     def reset(self) -> Dict:
+        self._metircs.reset()
+
         scenario = next(self._scenarios_iterator)
 
         self._dones_registered = 0
@@ -274,7 +283,7 @@ def main(scenarios, headless, seed, auth_key=None):
 
     # Setup AgentSpec for tested agent
     ego_spec = AgentSpec(
-        interface=AgentInterface.from_type(AgentType.Tracker, neighborhood_vehicles=True),
+        interface=AgentInterface.from_type(AgentType.TrajectoryInterpolator, neighborhood_vehicles=True),
         action_adapter=RemoteIdealWorldEgo.action_adapter,
         observation_adapter=RemoteIdealWorldEgo.observation_adapter,
         agent_builder=RemoteIdealWorldEgo,
