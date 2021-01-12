@@ -23,10 +23,13 @@ import numpy as np
 from . import case_definition_pb2
 import zmq
 import time
+import math
+from smarts.core.coordinates import Heading
 
 KNOCK_MSG = 'This is IdealWorld'
 REP_KNOCK_MSG = 'This is Benchmark'
-PI = 3.1415926
+HALF_PI = math.pi / 2
+PI = math.pi
 
 class RemoteIdealWorldEgo:
 
@@ -62,31 +65,49 @@ class RemoteIdealWorldEgo:
                 self._socket.send(proto_rep.SerializeToString())
                 print("Unknown connection request!")
 
+    def generate_stop_proto_traj(proto_mov_obj):
+        ''' Generate a stop traj according with a protobuf mov obj struct.
+            The definition of 'stop traj' can be found at
+            TrajectoryInterpolationController.perform_trajectory_interpolation().
+        '''
+        traj = case_definition_pb2.Trajectory()
+        traj_point = traj.traj_points.add()
 
-    def act(self, proto_obs, is_reset):
+        traj_point.x = proto_mov_obj.pose2d.pos.x
+        traj_point.y = proto_mov_obj.pose2d.pos.y
+        traj_point.theta = proto_mov_obj.pose2d.theta
+        traj_point.vel = proto_mov_obj.vel
+        traj_point.t = 0.0
+
+        return traj
+
+
+    def send_observation(self, proto_ego_obs, is_reset):
         ''' Observation has been transferred by adapter'''
 
-        req_message = self._socket.recv()
-        proto_req = case_definition_pb2.BridgeRequestMessage()
-        proto_req.ParseFromString(req_message)
-
-        # print("proto req is: %s" % proto_req)
-
         proto_rep = case_definition_pb2.BridgeReplyMessage()
-        proto_rep.observation.CopyFrom(proto_obs)
+        proto_rep.observation.CopyFrom(proto_ego_obs)
 
         if is_reset:
             proto_rep.state = 'Reset'
         else:
             proto_rep.state = 'Observation'
+
         self._socket.send(proto_rep.SerializeToString())
+
+    def recv_action(self):
+
+        req_message = self._socket.recv()
+
+        proto_req = case_definition_pb2.BridgeRequestMessage()
+        proto_req.ParseFromString(req_message)
 
         return proto_req.traj
 
     @staticmethod
     def action_adapter(ideal_world_traj):
         '''Transfer proto trajectory to SMARTS trajectory'''
-        print("action adapter action traj: ", ideal_world_traj)
+        # print("action adapter action traj: ", ideal_world_traj)
 
         t = []
         x = []
@@ -98,7 +119,7 @@ class RemoteIdealWorldEgo:
             t.append(traj_point.t)
             x.append(traj_point.x)
             y.append(traj_point.y)
-            theta.append(traj_point.theta - (PI / 2))
+            theta.append(Heading(traj_point.theta - HALF_PI))
             speed.append(traj_point.vel)
 
         if len(x) < 2 or len(y) < 2 or len(theta) < 2 or len(speed) < 2:
@@ -125,7 +146,7 @@ class RemoteIdealWorldEgo:
         ego.vel = ego_vehicle_state.speed
         ego.pose2d.pos.x = ego_vehicle_state.position[0]
         ego.pose2d.pos.y = ego_vehicle_state.position[1]
-        ego.pose2d.theta = ego_vehicle_state.heading + PI / 2
+        ego.pose2d.theta = ego_vehicle_state.heading + HALF_PI
 
 
         for i, vehicle_observation in enumerate(observation.neighborhood_vehicle_states):
@@ -139,7 +160,8 @@ class RemoteIdealWorldEgo:
             mov_obj.vel = vehicle_observation.speed
             mov_obj.pose2d.pos.x = vehicle_observation.position[0]
             mov_obj.pose2d.pos.y = vehicle_observation.position[1]
-            mov_obj.pose2d.theta = vehicle_observation.heading + PI / 2
+            mov_obj.pose2d.theta = vehicle_observation.heading + HALF_PI
 
-        # print("---observation:", proto_obs)
+        # print("observation adapter smarts original observation:", ego_vehicle_state)
+        # print("observation adapter observation:", proto_obs)
         return proto_obs

@@ -37,7 +37,7 @@ from smarts.core.agent import AgentSpec
 from smarts.core.agent_interface import AgentInterface, AgentType
 from smarts.core.agent_manager import AgentManager
 
-from smarts.benchmark.metrics.basic_metrics import Metric
+from benchmark.metrics.basic_metrics import Metric
 
 from examples import default_argument_parser
 
@@ -97,7 +97,7 @@ class BenchmarkServer:
             used to specify envision's uri
         envision_record_data_replay_path:
             used to specify envision's data replay output directory
-        zoo_workers:
+        zoo_addrs:
             List of (ip, port) tuples of Zoo Workers, used to instantiate remote social agents
         auth_key:
             Authentication key of type string for communication with Zoo Workers
@@ -119,8 +119,7 @@ class BenchmarkServer:
         endless_traffic=True,
         envision_endpoint=None,
         envision_record_data_replay_path=None,
-        zoo_workers=None,
-        auth_key=None,
+        zoo_addrs=None
     ):
         self._metircs = Metric(1)
 
@@ -169,8 +168,7 @@ class BenchmarkServer:
             envision=envision_client,
             visdom=visdom_client,
             timestep_sec=timestep_sec,
-            zoo_workers=zoo_workers,
-            auth_key=auth_key,
+            zoo_addrs=zoo_addrs
         )
 
     @property
@@ -201,30 +199,31 @@ class BenchmarkServer:
         '''Main processdure of benchmarking.'''
 
         proto_obs = dict()
+
         try:
             proto_obs = self.reset()
         except StopIteration:
-            print("No sceanrio has been setted for testing!")
+            print("All specified scenarios has been tested!")
             return
 
+        self._ego.block_for_connection(proto_obs[EGO_ID])
+
         while True:
-            if self.has_connection:
+            proto_ego_act = self._ego.recv_action()
+            proto_obs, dones = self.step({EGO_ID: proto_ego_act})
+
+            if dones["__all__"]:
+                metric_res = self._metircs.compute()
                 try:
                     proto_obs = self.reset()
                 except StopIteration:
-                    print("All specified scenarios has been tested!")
-                    break
-            else:
-                self._ego.block_for_connection(proto_obs[EGO_ID])
-                self.has_connection = True
+                    print("All sceanrios has been tested!")
+                    return
 
-            dones = {"__all__": False}
-            while not dones["__all__"]:
-                proto_ego_obs = proto_obs[EGO_ID]
-                proto_ego_act = self._ego.act(proto_ego_obs, self._is_reset)
-                proto_obs, _, dones, _ = self.step({EGO_ID: proto_ego_act})
-            metric_res = self._metircs.compute()
-            print("++++Metric++++\n", metric_res)
+                dones = {"__all__": False}
+
+            proto_ego_obs = proto_obs[EGO_ID]
+            self._ego.send_observation(proto_ego_obs, self._is_reset)
 
     def step(self, agent_actions):
         '''Input serilized action and out serilized observation as well'''
@@ -235,9 +234,9 @@ class BenchmarkServer:
         }
 
         observations, rewards, agent_dones, infos = self._smarts.step(agent_actions)
-        self._metircs.log_step(observations, rewards, agent_dones, infos, 0)
-        print("smarts ego action : ", agent_actions[EGO_ID])
-        print("smarts ego observation: ", observations[EGO_ID])
+
+        # TODO: (kls)Enable benchmark
+        # self._metircs.log_step(observations, rewards, agent_dones, infos, 0)
 
         obs = dict()
         for agent_id in observations:
@@ -251,7 +250,7 @@ class BenchmarkServer:
         agent_dones["__all__"] = self._dones_registered == len(self._agent_specs)
 
         self._is_reset = False
-        return obs, _, agent_dones, _
+        return obs, agent_dones
 
     def reset(self) -> Dict:
         self._metircs.reset()
@@ -268,18 +267,14 @@ class BenchmarkServer:
 
         self._is_reset = True
         obs[EGO_ID].mov_objs[0].pose2d.pos.x = 30.0
-        print('++++++++++++++RESET+++++++++++')
+        print('++++++++++++++RESET++++++++++++')
         return obs
-
-    def render(self, mode="human"):
-        """Does nothing."""
-        pass
 
     def close(self):
         if self._smarts is not None:
             self._smarts.destroy()
 
-def main(scenarios, headless, seed, auth_key=None):
+def main(scenarios, headless, seed):
 
     # Setup AgentSpec for tested agent
     ego_spec = AgentSpec(
@@ -296,8 +291,7 @@ def main(scenarios, headless, seed, auth_key=None):
         agent_specs={EGO_ID: ego_spec},
         headless=headless,
         timestep_sec=0.1,
-        seed=seed,
-        auth_key=auth_key
+        seed=seed
     )
 
     benchmark_server.run_benchmark()
